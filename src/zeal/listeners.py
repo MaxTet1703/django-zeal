@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from typing import Optional, TypedDict
 
+import sentry_sdk
 from django.conf import settings
 from django.db import models
 
@@ -82,6 +83,11 @@ class Listener(ABC):
             if hasattr(settings, "ZEAL_SHOW_ALL_CALLERS")
             else False
         )
+        raise_in_sentry = (
+            settings.ZEAL_RAISE_IN_SENTRY
+            if hasattr(settings, "ZEAL_RAISE_IN_SENTRY")
+            else False
+        )
         is_allowlisted = False
         for entry in self._allowlist:
             model_match = fnmatch(
@@ -104,8 +110,11 @@ class Listener(ABC):
                     message += f"  {frame.filename}:{frame.lineno} in {frame.function}\n"
         else:
             message = f"{message} at {final_caller.filename}:{final_caller.lineno} in {final_caller.function}"
+        error = self.error_class(message)
         if should_error:
-            raise self.error_class(message)
+            raise error
+        elif raise_in_sentry:
+            sentry_sdk.capture_exception(error)
         else:
             warnings.warn_explicit(
                 message,

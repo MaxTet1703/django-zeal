@@ -153,6 +153,12 @@ rather log any detected N+1s as warnings, you can set:
 ZEAL_RAISE = False
 ```
 
+If you want send message to sentry, you can set
+
+```python
+ZEAL_RAISE_IN_SENTRY = True
+```
+
 N+1s will be reported when the same query is executed twice. To configure this
 threshold, set the following in your Django settings.
 
