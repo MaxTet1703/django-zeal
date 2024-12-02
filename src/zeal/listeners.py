@@ -92,6 +92,49 @@ class Listener(ABC):
 
         return [*settings_allowlist, *_nplusone_context.get().allowlist]
 
+    def _get_detailed_message(
+        self,
+        model: type[models.Model],
+        field: str,
+        message: str,
+        calls: list[list[inspect.FrameInfo]],
+    ):
+        should_include_all_callers = (
+            settings.ZEAL_SHOW_ALL_CALLERS
+            if hasattr(settings, "ZEAL_SHOW_ALL_CALLERS")
+            else False
+        )
+        is_allowlisted = False
+        for entry in self._allowlist:
+            model_match = fnmatch(
+                f"{model._meta.app_label}.{model.__name__}", entry["model"]
+            )
+            field_match = fnmatch(field, entry.get("field") or "*")
+            if model_match and field_match:
+                is_allowlisted = True
+                break
+
+        if is_allowlisted:
+            return
+
+        final_caller = get_caller()
+        if should_include_all_callers:
+            message = f"{message} with calls:\n"
+            for i, caller in enumerate(calls):
+                message += f"CALL {i+1}:\n"
+                for frame in caller:
+                    message += f"  {frame.filename}:{frame.lineno} in {frame.function}\n"
+        else:
+            message = f"{message} at {final_caller.filename}:{final_caller.lineno} in {final_caller.function}"
+
+        return {
+            "message": message,
+            "category": UserWarning,
+            "file_name": final_caller.filename,
+            "lineno": final_caller.lineno,
+        }
+
+
     def _alert(
         self,
         model: type[models.Model],
@@ -133,8 +176,8 @@ class Listener(ABC):
             raise self.error_class(message)
         else:
             warnings.warn_explicit(
-                message,
-                UserWarning,
+                message=message,
+                category=UserWarning,
                 filename=final_caller.filename,
                 lineno=final_caller.lineno,
             )
@@ -158,6 +201,8 @@ class NPlusOneListener(Listener):
         key = (model, field, f"{caller.filename}:{caller.lineno}")
         context.calls[key].append(get_stack())
         count = len(context.calls[key])
+
+        message = None
         if count >= self._threshold and instance_key not in context.ignored:
             message = f"N+1 detected on {model._meta.app_label}.{model.__name__}.{field}"
             self._alert(model, field, message, context.calls[key])
